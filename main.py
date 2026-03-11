@@ -3,7 +3,12 @@ import asyncio
 import dotenv
 import streamlit as st
 
-from agents import InputGuardrailTripwireTriggered, Runner, SQLiteSession
+from agents import (
+    InputGuardrailTripwireTriggered,
+    OutputGuardrailTripwireTriggered,
+    Runner,
+    SQLiteSession,
+)
 from models import RestaurantContext
 from my_agents.triage_agent import triage_agent
 
@@ -15,6 +20,7 @@ HANDOFF_MESSAGES = {
     "Menu Agent":        "🍽️ 메뉴 전문가에게 연결합니다...",
     "Order Agent":       "🛒 주문 담당자에게 연결합니다...",
     "Reservation Agent": "📅 예약 담당자에게 연결합니다...",
+    "Complaints Agent":  "🙏 불편 사항 담당자에게 연결합니다...",
 }
 
 if "session" not in st.session_state:
@@ -36,13 +42,21 @@ restaurant_ctx: RestaurantContext = st.session_state["restaurant_ctx"]
 async def paint_history():
     messages = await session.get_items()
     for message in messages:
-        if "role" in message:
-            with st.chat_message(message["role"]):
-                if message["role"] == "user":
-                    st.write(message["content"])
-                else:
-                    if message["type"] == "message":
-                        st.write(message["content"][0]["text"].replace("$", r"\$"))
+        role = message.get("role")
+        if not role:
+            continue
+
+        with st.chat_message(role):
+            if role == "user":
+                st.write(message.get("content", ""))
+            elif message.get("type") == "message":
+                text_parts = [
+                    part.get("text", "")
+                    for part in message.get("content", [])
+                    if part.get("type") == "output_text"
+                ]
+                if text_parts:
+                    st.write("\n\n".join(text_parts).replace("$", r"\$"))
 
 
 asyncio.run(paint_history())
@@ -82,6 +96,12 @@ async def run_agent(message):
 
         except InputGuardrailTripwireTriggered:
             st.write("죄송합니다, 레스토랑 관련 문의만 도와드릴 수 있습니다.")
+        except OutputGuardrailTripwireTriggered:
+            reason = restaurant_ctx.guardrail_state.last_violation_reason or "안전 지침을 충족하지 못했습니다."
+            st.warning(f"답변이 안전 기준을 충족하지 못해 표시하지 않았습니다.\n사유: {reason}")
+            text_placeholder = st.empty()
+        finally:
+            st.session_state["agent"] = triage_agent
 
 
 message = st.chat_input("무엇을 도와드릴까요?")
@@ -89,6 +109,8 @@ message = st.chat_input("무엇을 도와드릴까요?")
 if message:
     if "text_placeholder" in st.session_state:
         st.session_state["text_placeholder"].empty()
+
+    st.session_state["agent"] = triage_agent
 
     with st.chat_message("human"):
         st.write(message)
@@ -124,4 +146,3 @@ with st.sidebar:
         st.session_state["restaurant_ctx"] = RestaurantContext()
         st.session_state["handoff_logs"] = []
         st.rerun()
-    st.write(asyncio.run(session.get_items()))
