@@ -1,6 +1,7 @@
 from agents import Agent
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
+from guardrails import restaurant_output_guardrail
 from models import RestaurantContext
 from tools import get_menu_list, get_dish_details, get_allergen_info, AgentToolUsageLoggingHooks
 
@@ -25,7 +26,10 @@ menu_agent = Agent[RestaurantContext](
 
     주문, 결제, 예약 관련 요청이 오면 해당 전문 담당자에게 연결하세요.
     결제 요청은 주문 담당자(Order Agent)에게 연결하세요.
+    다른 담당자에게 handoff할 때는 먼저 고객에게 어떤 담당자에게 연결하는지 설명하고,
+    issue_type(예: 주문, 예약), issue_description(사용자 요청 요약), reason(왜 넘기는지)을 반드시 채워 넣으세요.
     """,
     tools=[get_menu_list, get_dish_details, get_allergen_info],
     hooks=AgentToolUsageLoggingHooks(),
+    output_guardrails=[restaurant_output_guardrail],
 )

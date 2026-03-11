@@ -1,9 +1,103 @@
+import json
 import random
-import streamlit as st
+import sqlite3
+from datetime import datetime
+from pathlib import Path
 from typing import Any
+
+import streamlit as st
 
 from agents import function_tool, AgentHooks, Agent, Tool, RunContextWrapper
 from models import RestaurantContext, OrderItem
+
+
+# =============================================================================
+# PERSISTENCE
+# =============================================================================
+
+DB_PATH = Path("restaurant-memory.db")
+
+
+def _get_conn():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db():
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reservations (
+                confirmation TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                date TEXT NOT NULL,
+                time TEXT NOT NULL,
+                party_size INTEGER NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """,
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS orders (
+                order_number TEXT PRIMARY KEY,
+                items_json TEXT NOT NULL,
+                total REAL NOT NULL,
+                confirmed_at TEXT NOT NULL
+            )
+            """,
+        )
+
+
+def _store_reservation(confirmation: str, name: str, date: str, time: str, party_size: int):
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO reservations
+            (confirmation, name, date, time, party_size, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (confirmation, name, date, time, party_size, datetime.utcnow().isoformat()),
+        )
+
+
+def _fetch_reservation(confirmation: str) -> dict | None:
+    with _get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT confirmation, name, date, time, party_size
+            FROM reservations
+            WHERE confirmation = ?
+            """,
+            (confirmation,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def _store_order(order_number: str, context: RestaurantContext):
+    items_payload = [
+        {"dish_name": item.dish_name, "quantity": item.quantity, "price": item.price}
+        for item in context.order_items
+    ]
+    total = sum(item["price"] * item["quantity"] for item in items_payload)
+    with _get_conn() as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO orders
+            (order_number, items_json, total, confirmed_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                order_number,
+                json.dumps(items_payload, ensure_ascii=False),
+                total,
+                datetime.utcnow().isoformat(),
+            ),
+        )
+
+
+_init_db()
 
 
 # =============================================================================
@@ -68,10 +162,6 @@ MENU = {
         "description": "깊은 국물의 소갈비탕",
     },
 }
-
-# In-memory reservation storage (persists within a process)
-RESERVATIONS: dict[str, dict] = {}
-
 
 # =============================================================================
 # MENU TOOLS
@@ -208,6 +298,7 @@ def confirm_order(wrapper: RunContextWrapper[RestaurantContext]) -> str:
     order_number = f"ORD-{random.randint(1000, 9999)}"
     total = sum(item.price * item.quantity for item in context.order_items)
     items_str = ", ".join(f"{item.dish_name} x{item.quantity}" for item in context.order_items)
+    _store_order(order_number, context)
 
     return f"""🎉 주문이 확정되었습니다!
 
@@ -305,12 +396,7 @@ def make_reservation(
         party_size: Number of people in the party
     """
     confirmation = f"RSV-{random.randint(10000, 99999)}"
-    RESERVATIONS[confirmation] = {
-        "name": name,
-        "date": date,
-        "time": time,
-        "party_size": party_size,
-    }
+    _store_reservation(confirmation, name, date, time, party_size)
 
     return f"""🎉 예약이 완료되었습니다!
 
@@ -333,7 +419,7 @@ def get_reservation(
     Args:
         confirmation_number: Reservation confirmation number (e.g. 'RSV-12345')
     """
-    reservation = RESERVATIONS.get(confirmation_number)
+    reservation = _fetch_reservation(confirmation_number)
     if not reservation:
         return f"'{confirmation_number}' 확인번호로 예약을 찾을 수 없습니다."
 
