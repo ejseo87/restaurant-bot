@@ -46,6 +46,11 @@ class RestaurantContext(BaseModel):
     reservation: ReservationTracker = Field(default_factory=ReservationTracker)
     complaint: ComplaintTracker = Field(default_factory=ComplaintTracker)
     handoff_history: list["HandoffData"] = Field(default_factory=list)
+    current_turn_handoffs: list[str] = Field(default_factory=list)
+    last_agent_name: str | None = None
+    last_user_message: str | None = None
+    handoffs_since_user_message: int = 0
+    loop_block_reason: str | None = None
 
 
 class InputGuardRailOutput(BaseModel):

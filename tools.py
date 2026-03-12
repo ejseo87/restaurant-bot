@@ -1,5 +1,6 @@
 import json
 import random
+import re
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from models import RestaurantContext, OrderItem
 # =============================================================================
 
 DB_PATH = Path("restaurant-memory.db")
+CONFIRMATION_PATTERN = re.compile(r"^RSV-\d{5}$", re.IGNORECASE)
 
 
 def _get_conn():
@@ -338,6 +340,10 @@ def process_payment(
     items_str = ", ".join(f"{item.dish_name} x{item.quantity}" for item in context.order_items)
     receipt_number = f"PAY-{random.randint(10000, 99999)}"
 
+    # Reset order state after successful payment
+    context.order_items.clear()
+    context.order_confirmed = False
+
     return f"""💳 결제가 완료되었습니다!
 
 영수증 번호: {receipt_number}
@@ -419,13 +425,17 @@ def get_reservation(
     Args:
         confirmation_number: Reservation confirmation number (e.g. 'RSV-12345')
     """
-    reservation = _fetch_reservation(confirmation_number)
+    cleaned_confirmation = confirmation_number.strip().upper()
+    if not CONFIRMATION_PATTERN.match(cleaned_confirmation):
+        return "예약을 조회하려면 확인번호(RSV-12345 형식)를 먼저 알려주세요."
+
+    reservation = _fetch_reservation(cleaned_confirmation)
     if not reservation:
-        return f"'{confirmation_number}' 확인번호로 예약을 찾을 수 없습니다."
+        return f"'{cleaned_confirmation}' 확인번호로 예약을 찾을 수 없습니다."
 
     return f"""📋 예약 정보
 
-확인번호: {confirmation_number}
+확인번호: {cleaned_confirmation}
 예약자명: {reservation['name']}
 날짜: {reservation['date']} {reservation['time']}
 인원: {reservation['party_size']}명"""

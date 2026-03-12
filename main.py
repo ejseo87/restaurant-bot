@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 import dotenv
 import streamlit as st
@@ -9,8 +10,15 @@ from agents import (
     Runner,
     SQLiteSession,
 )
+from agents.exceptions import MaxTurnsExceeded
 from models import RestaurantContext
-from my_agents.triage_agent import triage_agent
+from my_agents.triage_agent import (
+    complaints_agent as routed_complaints_agent,
+    menu_agent as routed_menu_agent,
+    order_agent as routed_order_agent,
+    reservation_agent as routed_res_agent,
+    triage_agent,
+)
 
 dotenv.load_dotenv()
 
@@ -22,6 +30,49 @@ HANDOFF_MESSAGES = {
     "Reservation Agent": "📅 예약 담당자에게 연결합니다...",
     "Complaints Agent":  "🙏 불편 사항 담당자에게 연결합니다...",
 }
+
+AGENT_REGISTRY = {
+    triage_agent.name: triage_agent,
+    routed_menu_agent.name: routed_menu_agent,
+    routed_order_agent.name: routed_order_agent,
+    routed_res_agent.name: routed_res_agent,
+    routed_complaints_agent.name: routed_complaints_agent,
+}
+
+OPTION_KEYWORDS = {
+    "첫번째",
+    "첫번째요",
+    "첫번째입니다",
+    "두번째",
+    "두번째요",
+    "두번째입니다",
+    "세번째",
+    "세번째요",
+    "세번째입니다",
+}
+
+def _is_option_follow_up(message: str) -> bool:
+    if not message:
+        return False
+    normalized = re.sub(r"[.!?~]", "", message.strip().lower())
+    if not normalized:
+        return False
+    compact = normalized.replace(" ", "")
+    if re.fullmatch(r"\d+", compact):
+        return True
+    if re.fullmatch(r"\d+번[가-힣a-z]*", compact):
+        return True
+    if compact in OPTION_KEYWORDS:
+        return True
+    return False
+
+
+def _starting_agent_for_message(message: str) -> "Agent[RestaurantContext]":
+    if _is_option_follow_up(message):
+        preferred = AGENT_REGISTRY.get(restaurant_ctx.last_agent_name)
+        if preferred and preferred.name != triage_agent.name:
+            return preferred
+    return triage_agent
 
 if "session" not in st.session_state:
     st.session_state["session"] = SQLiteSession(
@@ -37,6 +88,12 @@ if "agent" not in st.session_state:
 if "restaurant_ctx" not in st.session_state:
     st.session_state["restaurant_ctx"] = RestaurantContext()
 restaurant_ctx: RestaurantContext = st.session_state["restaurant_ctx"]
+if not hasattr(restaurant_ctx, "current_turn_handoffs"):
+    restaurant_ctx.current_turn_handoffs = []
+    restaurant_ctx.handoffs_since_user_message = 0
+    restaurant_ctx.loop_block_reason = None
+    restaurant_ctx.last_agent_name = None
+    restaurant_ctx.last_user_message = None
 
 
 async def paint_history():
@@ -70,6 +127,7 @@ async def run_agent(message):
         st.session_state["text_placeholder"] = text_placeholder
 
         try:
+            restaurant_ctx.last_agent_name = st.session_state["agent"].name
             stream = Runner.run_streamed(
                 st.session_state["agent"],
                 message,
@@ -95,11 +153,15 @@ async def run_agent(message):
                         response = ""
 
         except InputGuardrailTripwireTriggered:
+            text_placeholder.empty()
             st.write("죄송합니다, 레스토랑 관련 문의만 도와드릴 수 있습니다.")
         except OutputGuardrailTripwireTriggered:
+            text_placeholder.empty()
             reason = restaurant_ctx.guardrail_state.last_violation_reason or "안전 지침을 충족하지 못했습니다."
             st.warning(f"답변이 안전 기준을 충족하지 못해 표시하지 않았습니다.\n사유: {reason}")
-            text_placeholder = st.empty()
+        except MaxTurnsExceeded:
+            text_placeholder.empty()
+            st.warning("답변이 10턴 제한을 초과해 중단되었습니다. 질문을 더 구체적으로 적어 다시 시도해주세요.")
         finally:
             st.session_state["agent"] = triage_agent
 
@@ -110,11 +172,20 @@ if message:
     if "text_placeholder" in st.session_state:
         st.session_state["text_placeholder"].empty()
 
-    st.session_state["agent"] = triage_agent
+    starting_agent = _starting_agent_for_message(message)
+    st.session_state["agent"] = starting_agent
+    restaurant_ctx.last_user_message = message
+    restaurant_ctx.handoffs_since_user_message = 0
+    restaurant_ctx.current_turn_handoffs.clear()
+    restaurant_ctx.loop_block_reason = None
+    restaurant_ctx.last_agent_name = starting_agent.name
 
     with st.chat_message("human"):
         st.write(message)
     asyncio.run(run_agent(message))
+    if restaurant_ctx.loop_block_reason:
+        st.info(restaurant_ctx.loop_block_reason)
+        restaurant_ctx.loop_block_reason = None
 
 
 # Sidebar
