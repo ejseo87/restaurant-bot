@@ -2,6 +2,7 @@ import asyncio
 import re
 
 import dotenv
+import openai
 import streamlit as st
 
 from agents import (
@@ -74,6 +75,10 @@ def _starting_agent_for_message(message: str) -> "Agent[RestaurantContext]":
             return preferred
     return triage_agent
 
+
+RATE_LIMIT_RETRY_ATTEMPTS = 3
+RATE_LIMIT_BACKOFF_SECONDS = 1.0
+
 if "session" not in st.session_state:
     st.session_state["session"] = SQLiteSession(
         "chat-history",
@@ -126,32 +131,66 @@ async def run_agent(message):
 
         st.session_state["text_placeholder"] = text_placeholder
 
-        try:
-            restaurant_ctx.last_agent_name = st.session_state["agent"].name
-            stream = Runner.run_streamed(
-                st.session_state["agent"],
-                message,
-                session=session,
-                context=restaurant_ctx,
+        rate_limit_retries = 0
+
+        async def handle_rate_limit_retry(error_message: str) -> bool:
+            nonlocal rate_limit_retries, response, text_placeholder
+            rate_limit_retries += 1
+            if rate_limit_retries > RATE_LIMIT_RETRY_ATTEMPTS:
+                text_placeholder.empty()
+                st.error("OpenAI API 속도 제한으로 응답을 가져오지 못했습니다. 잠시 후 다시 시도해 주세요.")
+                return False
+
+            wait_seconds = RATE_LIMIT_BACKOFF_SECONDS * rate_limit_retries
+            response = ""
+            text_placeholder.empty()
+            st.info(
+                f"OpenAI 속도 제한으로 {wait_seconds:.1f}초 대기 후 재시도합니다... "
+                f"({rate_limit_retries}/{RATE_LIMIT_RETRY_ATTEMPTS})"
             )
+            await asyncio.sleep(wait_seconds)
+            text_placeholder = st.empty()
+            return True
 
-            async for event in stream.stream_events():
-                if event.type == "raw_response_event":
-                    if event.data.type == "response.output_text.delta":
-                        response += event.data.delta
-                        text_placeholder.write(response.replace("$", r"\$"))
+        try:
+            while True:
+                try:
+                    restaurant_ctx.last_agent_name = st.session_state["agent"].name
+                    stream = Runner.run_streamed(
+                        st.session_state["agent"],
+                        message,
+                        session=session,
+                        context=restaurant_ctx,
+                    )
 
-                elif event.type == "agent_updated_stream_event":
-                    if st.session_state["agent"].name != event.new_agent.name:
-                        msg = HANDOFF_MESSAGES.get(
-                            event.new_agent.name,
-                            f"{event.new_agent.name}에 연결됨",
-                        )
-                        st.write(msg)
-                        st.session_state["agent"] = event.new_agent
-                        text_placeholder = st.empty()
-                        response = ""
+                    async for event in stream.stream_events():
+                        if event.type == "raw_response_event":
+                            if event.data.type == "response.output_text.delta":
+                                response += event.data.delta
+                                text_placeholder.write(response.replace("$", r"\$"))
 
+                        elif event.type == "agent_updated_stream_event":
+                            if st.session_state["agent"].name != event.new_agent.name:
+                                msg = HANDOFF_MESSAGES.get(
+                                    event.new_agent.name,
+                                    f"{event.new_agent.name}에 연결됨",
+                                )
+                                st.write(msg)
+                                st.session_state["agent"] = event.new_agent
+                                text_placeholder = st.empty()
+                                response = ""
+                    break
+                except openai.RateLimitError as rate_err:
+                    should_retry = await handle_rate_limit_retry(str(rate_err))
+                    if not should_retry:
+                        return
+                except openai.APIError as api_err:
+                    if getattr(api_err, "status_code", None) == 429:
+                        should_retry = await handle_rate_limit_retry(str(api_err))
+                        if not should_retry:
+                            return
+                    else:
+                        raise
         except InputGuardrailTripwireTriggered:
             text_placeholder.empty()
             st.write("죄송합니다, 레스토랑 관련 문의만 도와드릴 수 있습니다.")
