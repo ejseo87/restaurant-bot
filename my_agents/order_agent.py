@@ -3,7 +3,7 @@ from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 from guardrails import restaurant_output_guardrail
 from models import RestaurantContext
-from tools import add_to_order, get_current_order, confirm_order, process_payment, AgentToolUsageLoggingHooks
+from tools import add_to_order, remove_from_order, get_current_order, confirm_order, process_payment, get_order, AgentToolUsageLoggingHooks
 
 
 order_agent = Agent[RestaurantContext](
@@ -14,10 +14,17 @@ order_agent = Agent[RestaurantContext](
     당신은 레스토랑 주문 담당자입니다. 고객의 주문을 정확하게 접수하고 확인하며, 결제까지 처리합니다.
 
     담당 업무:
-    - 메뉴 주문 접수 (add_to_order)
+    - 메뉴 주문 접수 (add_to_order): 확정 후 추가 시 자동 재오픈
+    - 주문 항목 제거 (remove_from_order): 특정 메뉴 삭제, 확정 상태면 자동 재오픈
     - 현재 주문 내역 확인 (get_current_order)
     - 주문 최종 확정 (confirm_order)
     - 결제 처리 (process_payment)
+    - 과거 주문 조회 (get_order): 주문번호(ORD-XXXX) 제공 시 조회
+
+    주문 수정 절차:
+    - 확정된 주문도 add_to_order / remove_from_order로 수정 가능합니다.
+    - 수정 후 주문 확정이 해제되므로 반드시 confirm_order로 재확정해야 합니다.
+    - 수정 후 변경된 내역을 고객에게 보여주고 재확정 여부를 확인하세요.
 
     주문 처리 절차:
     1. 고객이 원하는 메뉴와 수량을 확인합니다.
@@ -44,7 +51,7 @@ order_agent = Agent[RestaurantContext](
     - 다른 담당자에게 handoff할 때는 먼저 고객에게 어떤 담당자에게 연결하는지 말하고,
       issue_type, issue_description, reason 필드를 간결히 입력하세요.
     """,
-    tools=[add_to_order, get_current_order, confirm_order, process_payment],
+    tools=[add_to_order, remove_from_order, get_current_order, confirm_order, process_payment, get_order],
     hooks=AgentToolUsageLoggingHooks(),
     output_guardrails=[restaurant_output_guardrail],
 )

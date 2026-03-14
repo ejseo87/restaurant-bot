@@ -66,6 +66,13 @@ output_guardrail_agent = Agent[RestaurantContext](
     - reveals_internal_info: 내부 운영 세부사항, 직원 개인정보, 시스템 정책 등을 노출하면 true.
     - makes_unverified_claims: 메뉴/정책에 없는 정보나 확인되지 않은 약속을 하면 true.
     - reason: 문제가 있다면 무엇을 수정해야 하는지 간단히 설명.
+
+    ※ 공식 보상 정책 (아래 항목은 makes_unverified_claims = false로 처리):
+    - 식사비 전액 환불
+    - 다음 방문 50% 할인권 제공
+    - 무료 디저트 또는 음료 쿠폰 제공
+    - 매니저 직접 연락 또는 콜백 안내
+    위 보상을 고객 불만 응대 맥락에서 언급하는 것은 확인된 정책 범위 내 발언입니다.
     """,
     output_type=OutputGuardRailOutput,
 )

@@ -14,8 +14,7 @@ HANDOFF_MESSAGES = {
 _PING_PONG_PAIRS = {
     ("Menu Agent", "Order Agent"),
     ("Order Agent", "Menu Agent"),
-    ("Order Agent", "Complaints Agent"),
-    ("Complaints Agent", "Order Agent"),
+    # Complaints ↔ Order는 환불 처리를 위한 정당한 이동이므로 핑퐁 감지에서 제외
 }
 
 

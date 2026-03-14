@@ -3,7 +3,14 @@ from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 from guardrails import restaurant_output_guardrail
 from models import RestaurantContext
-from tools import check_availability, make_reservation, get_reservation, AgentToolUsageLoggingHooks
+from tools import (
+    check_availability,
+    make_reservation,
+    get_reservation,
+    update_reservation,
+    cancel_reservation,
+    AgentToolUsageLoggingHooks,
+)
 
 
 reservation_agent = Agent[RestaurantContext](
@@ -17,6 +24,8 @@ reservation_agent = Agent[RestaurantContext](
     - 예약 가능 여부 확인 (check_availability)
     - 테이블 예약 생성 (make_reservation)
     - 기존 예약 조회 (get_reservation)
+    - 예약 변경 (update_reservation)
+    - 예약 취소 (cancel_reservation)
 
     예약 처리 절차:
     1. 다음 정보를 수집합니다:
@@ -24,20 +33,32 @@ reservation_agent = Agent[RestaurantContext](
        - 날짜 (YYYY-MM-DD 형식, 예: 2026-03-15)
        - 시간 (HH:MM 형식, 예: 18:00)
        - 인원수
+       - 예약자 연락처
     2. check_availability로 가능 여부를 확인합니다.
     3. 가능하면 make_reservation으로 예약을 생성합니다.
     4. 불가능하면 대안 시간을 안내하고 재확인합니다.
     - 날짜/시간 형식이 다르면 예시를 다시 보여주며 올바른 값을 요청하세요.
-    - 기존 예약 조회(get_reservation)는 고객이 RSV-12345 형식의 확인번호를 제공한 경우에만 진행하세요. 번호가 없으면 먼저 요청하고 기다리세요.
+    - 기존 예약 조회(get_reservation)는 예약 확인번호(RSV-XXXXX)를 제공하면 진행하세요. 예약 확인번호(RSV-XXXXX)없다면 예약자 이름과 예약자 연락처를 모두 제공한 경우에만 진행하세요. 예약 확인번호(RSV-XXXXX)나 예약자 이름과 예약자 연락처가 없으면 먼저 요청하고 기다리세요.
+
+    예약 변경 절차:
+    - 변경 요청 시 확인번호(RSV-XXXXX)를 먼저 확인합니다.
+    - 변경할 항목(날짜/시간/인원/연락처)만 update_reservation에 전달하세요.
+    - 날짜/시간 변경 시 check_availability로 가능 여부를 먼저 확인하세요.
+
+    예약 취소 절차:
+    - 취소 요청 시 확인번호(RSV-XXXXX)를 확인합니다.
+    - 취소 전 예약 정보를 보여주고 고객에게 최종 확인을 받으세요.
+    - 확인 후 cancel_reservation을 호출합니다.
 
     주의사항:
     - 모든 정보를 수집한 후 가용성 확인을 진행하세요.
     - 예약 확인번호(RSV-XXXXX)를 반드시 고객에게 전달하세요.
-    - 메뉴나 주문 관련 요청은 해당 담당자에게 연결하세요.
-    - 결제 요청은 주문 담당자(Order Agent)에게 연결하세요.
+    - 메뉴 관련 요청은 메뉴 전문가(Menu Agnet)에게 연결하세요.
+    - 주문, 결제 관련 요청은 주문 담당자(Order Agent)에게 연결하세요.
+    - 불만, 환불, 보상 요청은 고객 불만 전담 Complaints Agent에게 연결하세요.
     - handoff 시 고객에게 어떤 담당자에게 연결되는지 알려주고 issue_type/issue_description/reason을 채워주세요.
     """,
-    tools=[check_availability, make_reservation, get_reservation],
+    tools=[check_availability, make_reservation, get_reservation, update_reservation, cancel_reservation],
     hooks=AgentToolUsageLoggingHooks(),
     output_guardrails=[restaurant_output_guardrail],
 )

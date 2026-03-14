@@ -13,6 +13,7 @@ from agents import (
 )
 from agents.exceptions import MaxTurnsExceeded
 from models import RestaurantContext
+from tools import reset_db_data
 from my_agents.triage_agent import (
     complaints_agent as routed_complaints_agent,
     menu_agent as routed_menu_agent,
@@ -23,7 +24,15 @@ from my_agents.triage_agent import (
 
 dotenv.load_dotenv()
 
-st.title("🍽️ Restaurant Bot")
+st.title("🍽️ Korean Food Restaurant Bot")
+
+AGENT_ICONS = {
+    "Triage Agent":      "🤖",
+    "Menu Agent":        "🍽️",
+    "Order Agent":       "🛒",
+    "Reservation Agent": "📅",
+    "Complaints Agent":  "⚠️",
+}
 
 HANDOFF_MESSAGES = {
     "Menu Agent":        "🍽️ 메뉴 전문가에게 연결합니다...",
@@ -51,6 +60,7 @@ OPTION_KEYWORDS = {
     "세번째요",
     "세번째입니다",
 }
+
 
 def _is_option_follow_up(message: str) -> bool:
     if not message:
@@ -125,6 +135,9 @@ asyncio.run(paint_history())
 
 
 async def run_agent(message):
+    st.session_state["event_log"] = []
+    st.session_state["hook_logs"] = []
+
     with st.chat_message("ai"):
         text_placeholder = st.empty()
         response = ""
@@ -164,12 +177,24 @@ async def run_agent(message):
                     )
 
                     async for event in stream.stream_events():
+
                         if event.type == "raw_response_event":
                             if event.data.type == "response.output_text.delta":
                                 response += event.data.delta
                                 text_placeholder.write(response.replace("$", r"\$"))
+                        else:
+                            agent_name = st.session_state["agent"].name
+                            extra = ""
+                            if event.type == "run_item_stream_event":
+                                item = event.item
+                                item_type = getattr(item, "type", None)
+                                if item_type == "tool_call_item":
+                                    extra = f" | tool: {getattr(item.raw_item, 'name', '')}"
+                                elif item_type == "tool_call_output_item":
+                                    extra = f" | tool_output: {str(getattr(item, 'output', ''))[:50]}"
+                            st.session_state["event_log"].append(f"{agent_name} , {event.type}{extra}")
 
-                        elif event.type == "agent_updated_stream_event":
+                        if event.type == "agent_updated_stream_event":
                             if st.session_state["agent"].name != event.new_agent.name:
                                 msg = HANDOFF_MESSAGES.get(
                                     event.new_agent.name,
@@ -205,7 +230,7 @@ async def run_agent(message):
             st.session_state["agent"] = triage_agent
 
 
-message = st.chat_input("무엇을 도와드릴까요?")
+message = st.chat_input("한식 전문 레스토랑입니다. 무엇을 도와드릴까요?")
 
 if message:
     if "text_placeholder" in st.session_state:
@@ -229,30 +254,67 @@ if message:
 
 # Sidebar
 with st.sidebar:
-    st.subheader("🛒 현재 주문")
-    if restaurant_ctx.order_items:
-        for item in restaurant_ctx.order_items:
-            st.write(f"• {item.dish_name} x{item.quantity} — {item.price * item.quantity:,.0f}원")
-        total = sum(i.price * i.quantity for i in restaurant_ctx.order_items)
-        st.write(f"**총합계: {total:,.0f}원**")
-        if restaurant_ctx.order_confirmed:
-            st.success("✅ 주문 확정됨")
-    else:
-        st.write("주문 내역 없음")
 
-    st.divider()
-
-    if st.session_state.get("handoff_logs"):
-        st.subheader("🔀 핸드오프 기록")
-        for log in st.session_state["handoff_logs"]:
-            st.info(f"{log['msg']}\n\n사유: {log['reason']}")
-        st.divider()
-
-    reset = st.button("대화 초기화")
-    if reset:
+    # ── 대화 초기화 버튼 (최상단) ──────────────────
+    if st.button("🔄 대화 초기화", use_container_width=True):
         asyncio.run(session.clear_session())
+        reset_db_data()
         del st.session_state["session"]
         st.session_state["agent"] = triage_agent
         st.session_state["restaurant_ctx"] = RestaurantContext()
         st.session_state["handoff_logs"] = []
+        st.session_state["event_log"] = []
+        st.session_state["hook_logs"] = []
         st.rerun()
+
+    st.divider()
+
+    # ── Agent Status (현재 에이전트) ───────────────
+    st.subheader("🤖 Current Agent")
+    current_agent = st.session_state.get("agent", triage_agent)
+    icon = AGENT_ICONS.get(current_agent.name, "🤖")
+    st.markdown(
+        f"<div style='background:#1e5c2e;padding:8px 12px;border-radius:6px;font-weight:bold'>"
+        f"{icon} {current_agent.name}</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.divider()
+
+    # ── Latest Handoff (접이식, 기본 열림) ─────────
+    if restaurant_ctx.handoff_history:
+        latest = restaurant_ctx.handoff_history[-1]
+        with st.expander("🔄 Latest Handoff", expanded=True):
+            st.markdown(f"**To:** {latest.to_agent_name}")
+            st.markdown(f"**Reason:** {latest.reason}")
+            st.markdown(f"**Type:** {latest.issue_type}")
+            st.markdown(f"**Issue:** {latest.issue_description}")
+
+    # ── Agent/Tool 실행 로그 ────────────────────────
+    hook_logs = st.session_state.get("hook_logs", [])
+    if hook_logs:
+        st.divider()
+        for entry in hook_logs:
+            t = entry["type"]
+            if t == "start":
+                st.write(f"🚀 **{entry['agent']}** 시작")
+            elif t == "tool_start":
+                st.write(f"🔧 **{entry['agent']}** 도구 실행 중: `{entry['tool']}`")
+            elif t == "tool_end":
+                st.write(f"✅ **{entry['agent']}** 도구 완료: `{entry['tool']}`")
+                st.code(entry["result"])
+            elif t == "handoff":
+                st.write(f"🔄 Handoff: **{entry['from']}** → **{entry['to']}**")
+            elif t == "end":
+                st.write(f"🏁 **{entry['agent']}** 완료")
+
+    st.divider()
+
+    # ── Event Log (Debug) ──────────────────────────
+    with st.expander("🔍 Event Log (Debug)"):
+        event_log = st.session_state.get("event_log", [])
+        if event_log:
+            for i, evt in enumerate(event_log, 1):
+                st.write(f"{i}. {evt}")
+        else:
+            st.caption("이벤트 없음")

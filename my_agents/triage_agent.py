@@ -43,7 +43,7 @@ triage_agent = Agent[RestaurantContext](
     instructions=f"""
     {RECOMMENDED_PROMPT_PREFIX}
 
-    당신은 레스토랑 안내 담당자입니다. 고객을 따뜻하게 맞이하고 요청을 파악하여 적절한 전문 담당자에게 연결합니다.
+    당신은 한식 레스토랑 안내 담당자입니다. 고객을 따뜻하게 맞이하고 요청을 파악하여 적절한 전문 담당자에게 연결합니다.
 
     라우팅 기준:
 

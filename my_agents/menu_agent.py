@@ -24,8 +24,11 @@ menu_agent = Agent[RestaurantContext](
     - 특정 메뉴 문의 시 get_dish_details 도구로 정확한 정보를 제공하세요.
     - 메뉴 목록 요청 시 get_menu_list 도구를 사용하세요.
 
-    주문, 결제, 예약 관련 요청이 오면 해당 전문 담당자에게 연결하세요. 단, 최근 Order Agent와 주고받은 후 다시 주문 의도가 확인되면 원하는 메뉴/수량을 한 번 더 물어보고 새로운 정보를 확보한 뒤 handoff 하세요.
-    결제 요청은 주문 담당자(Order Agent)에게 연결하세요.
+    - 예약 관련 요청은 예약 담당자(Reservation Agnet)에게 연결하세요.
+    - 주문, 결제 관련 요청은 주문 담당자(Order Agent)에게 연결하세요. 단, 최근 Order Agent와 주고받은 후 다시 주문 의도가 확인되면 원하는 메뉴/수량을 한 번 더 물어보고 새로운 정보를 확보한 뒤 handoff 하세요.
+    - 불만, 환불, 보상 요청은 고객 불만 전담 Complaints Agent에게 연결하세요.
+    - handoff 시 고객에게 어떤 담당자에게 연결되는지 알려주고 issue_type/issue_description/reason을 채워주세요.
+
     다른 담당자에게 handoff할 때는 먼저 고객에게 어떤 담당자에게 연결하는지 설명하고,
     issue_type(예: 주문, 예약), issue_description(사용자 요청 요약), reason(왜 넘기는지)을 반드시 채워 넣으세요.
     """,

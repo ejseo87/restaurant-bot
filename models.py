@@ -43,6 +43,7 @@ class RestaurantContext(BaseModel):
     guardrail_state: GuardrailState = Field(default_factory=GuardrailState)
     order_items: list[OrderItem] = Field(default_factory=list)
     order_confirmed: bool = False
+    order_number: str | None = None
     reservation: ReservationTracker = Field(default_factory=ReservationTracker)
     complaint: ComplaintTracker = Field(default_factory=ComplaintTracker)
     handoff_history: list["HandoffData"] = Field(default_factory=list)
